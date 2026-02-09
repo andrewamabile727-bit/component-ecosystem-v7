@@ -2,15 +2,16 @@ import streamlit as st
 import pandas as pd
 import io
 
-# --- 1. ENGINE V7.0 (COMPONENT PHASE) ---
+# --- 1. ENGINE V7.0 (THE BRAIN) ---
 def poly_hash_v7(string_in, modulo=100000):
     """Generates a 5-digit unique numerical code (00000-99999)"""
     h = 0
+    # Removes dashes, spaces, and makes everything uppercase for a perfect match
     clean_str = str(string_in).upper().replace("-", "").replace(" ", "")
     for char in clean_str:
         h = (h * 53 + ord(char))
     h += len(clean_str)
-    return f"{h % modulo:05d}"
+    return f"{h % modulo:03d}" if modulo == 1000 else f"{h % modulo:05d}"
 
 # --- 2. APP CONFIGURATION ---
 st.set_page_config(page_title="Component Ecosystem v7.0", layout="wide")
@@ -26,7 +27,9 @@ category_data = {
     "Int. Cabinet Sheathing": "I",
     "Trim": "T",
     "J-Channel": "J",
-    "Mounting & Accessory Parts": "B"
+    "Mounting & Accessory Parts": "B",
+    "Packaging": "R",
+    "Accessories/UX Kit": "U"
 }
 
 category = st.sidebar.selectbox("Select Component Category", list(category_data.keys()))
@@ -38,21 +41,24 @@ uploaded_file = st.file_uploader(f"Upload {category} CSV", type="csv")
 if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
     
+    # 5th Grade Safety Check: Make sure the MasterCode column exists
     if "MasterCode" not in df.columns:
-        st.error("❌ Error: Your CSV must have a column named 'MasterCode'!")
+        st.error("❌ Error: Your CSV file is missing the 'MasterCode' column!")
+        st.info("Please rename your column to 'MasterCode' and try again.")
     else:
         if st.button("🚀 Generate Component IDs"):
-            # Generate the ID: Prefix + 5-digit Hash
+            # Create the ID: Hard Prefix + 5-digit number
             df['Component ID'] = df['MasterCode'].apply(lambda x: f"{prefix}{poly_hash_v7(x)}")
             
-            # Check for duplications in this specific file
+            # Check for duplications (Twin Check)
             duplicates = df.duplicated(subset=['Component ID']).sum()
             
             st.success(f"✅ IDs Generated for {category}!")
+            
             if duplicates > 0:
-                st.warning(f"⚠️ Note: Found {duplicates} duplicate IDs in this file. Please review your MasterCodes.")
+                st.warning(f"⚠️ Warning: Found {duplicates} duplicate IDs in this list.")
             else:
-                st.info("✨ Zero duplications detected in this batch.")
+                st.info("✨ Clean Batch: Zero duplicates detected.")
             
             st.dataframe(df)
             
@@ -61,6 +67,6 @@ if uploaded_file is not None:
             st.download_button(
                 label="📥 Download Component List",
                 data=csv,
-                file_name=f"{category.replace(' ', '_')}_IDs.csv",
+                file_name=f"{category.replace(' ', '_')}_Export.csv",
                 mime='text/csv'
             )
