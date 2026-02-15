@@ -11,7 +11,7 @@ def poly_hash_v7(string_in, modulo=100000):
     for char in clean_str:
         h = (h * 53 + ord(char))
     h += len(clean_str)
-    return f"{h % modulo:03d}" if modulo == 1000 else f"{h % modulo:05d}"
+    return f"{h % modulo:05d}"
 
 # --- 2. APP CONFIGURATION ---
 st.set_page_config(page_title="Component Ecosystem v7.0", layout="wide")
@@ -29,7 +29,8 @@ category_data = {
     "J-Channel": "J",
     "Mounting & Accessory Parts": "B",
     "Packaging": "R",
-    "Accessories/UX Kit": "U"
+    "Accessories/UX Kit": "U",
+    "OTS Base Level Components": "K"  # New Addition
 }
 
 category = st.sidebar.selectbox("Select Component Category", list(category_data.keys()))
