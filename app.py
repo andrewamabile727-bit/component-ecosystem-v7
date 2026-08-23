@@ -124,8 +124,8 @@ if uploaded_file is not None:
             safe_category_name = category.replace(" & ", "_").replace(" ", "_")
             file_name = f"{safe_category_name}_Generated_Codes.csv"
 
-            # Convert to CSV string with explicit Windows line endings (\r\n) for Excel compatibility
-            csv_string = st.session_state.processed_df.to_csv(index=False, line_terminator='\r\n')
+            # Convert to CSV string with correct lineterminator parameter for Windows/Excel compatibility
+            csv_string = st.session_state.processed_df.to_csv(index=False, lineterminator='\r\n')
             csv_bytes = csv_string.encode('utf-8-sig')
 
             st.download_button(
