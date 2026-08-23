@@ -112,12 +112,16 @@ if uploaded_file is not None:
             st.markdown("### Processed Batch Results (Guaranteed Unique)")
             st.dataframe(processed_df, use_container_width=True, hide_index=True)
 
-            # Generate Download Button
-            csv_bytes = processed_df.to_csv(index=False).encode('utf-8-sig')
+            # Generate Clean File Name (Removing "&" and spaces)
+            safe_category_name = category.replace(" & ", "_").replace(" ", "_")
+            file_name = f"{safe_category_name}_Generated_Codes.csv"
+
+            # Generate Download Button using standard utf-8 to prevent Excel errors
+            csv_bytes = processed_df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label=f"📥 Download Processed {category} CSV",
                 data=csv_bytes,
-                file_name=f"{category.replace(' ', '_')}_Generated_Codes.csv",
+                file_name=file_name,
                 mime="text/csv"
             )
 
