@@ -1,15 +1,16 @@
 import streamlit as st
 import pandas as pd
 import random
+import re
 
-st.set_page_config(page_title="Component Ecosystem Code Generator v7.4", layout="wide")
+st.set_page_config(page_title="Component Ecosystem Code Generator v7.5", layout="wide")
 
-st.title("🧩 Component Ecosystem Code Generator v7.4")
-st.markdown("Standardized part number generator and prefix converter (`F` → `B`).")
+st.title("🧩 Component Ecosystem Code Generator")
+st.markdown("Batch master code converter and 6-character part number generator.")
 
-# --- 1. BATCH FILE PROCESSING & CONVERTER ---
+# --- 1. BATCH FILE CONVERTER (MAIN SCREEN) ---
 st.header("1. Batch Master File Converter")
-uploaded_file = st.file_uploader("Upload Master File / Code CSV", type=["csv"])
+uploaded_file = st.file_uploader("Upload Item Master / Code CSV File", type=["csv"])
 
 existing_codes = set()
 
@@ -18,55 +19,55 @@ if uploaded_file is not None:
         df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
         df.columns = [str(c).strip() for c in df.columns]
         
-        # Auto-detect code column (MasterCode, Part No, or first column)
+        # Detect part number column
         code_col = next((c for c in df.columns if any(k in c.lower() for k in ["mastercode", "part", "code", "item"])), df.columns[0])
         
-        st.success(f"File loaded successfully. Detected target column: `{code_col}` ({len(df)} records).")
-
-        # Conversion logic for both structured (F-00.00...) and simple (F12345) codes
-        def convert_code(val):
+        # Function to generate 6-character B-code (B + 5 digits)
+        used_seeds = set()
+        
+        def format_to_6char_b(val):
             s = str(val).strip()
-            if s.startswith("F-"):
-                return "B-" + s[2:]
-            elif s.startswith("F"):
-                return "B" + s[1:]
-            return s
+            # Extract digits from the input string
+            digits_only = re.sub(r'\D', '', s)
+            
+            if len(digits_only) >= 5:
+                # Take 5 digits
+                seed = digits_only[:5] if len(digits_only) == 5 else digits_only[-5:]
+            else:
+                # Generate unique 5 digits if fewer than 5 exist
+                while True:
+                    seed = str(random.randint(10000, 99999))
+                    if seed not in used_seeds:
+                        break
+            
+            used_seeds.add(seed)
+            return f"B{seed}"
 
-        # Generate converted column
+        # Apply conversion
         converted_df = df.copy()
-        converted_df["Original_Code"] = df[code_col]
-        converted_df[code_col] = df[code_col].apply(convert_code)
+        converted_df[code_col] = [format_to_6char_b(val) for val in df[code_col]]
 
-        # Show comparison view
-        st.subheader("Conversion Preview (F → B Prefix Swap)")
-        
-        diff_count = (converted_df["Original_Code"] != converted_df[code_col]).sum()
-        st.info(f"Updated **{diff_count}** part numbers to the **`B`** prefix while preserving all remaining digits and characters.")
+        # Display converted table
+        st.dataframe(converted_df, use_container_width=True, hide_index=True)
 
-        # Display preview table
-        preview_cols = ["Original_Code", code_col] + [c for c in df.columns if c != code_col]
-        st.dataframe(converted_df[preview_cols], use_container_width=True, hide_index=True)
-
-        # Download clean CSV with updated codes
-        export_df = converted_df.drop(columns=["Original_Code"])
-        csv_bytes = export_df.to_csv(index=False).encode('utf-8-sig')
-        
+        # Download button for converted file
+        csv_bytes = converted_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
-            label="📥 Download Converted CSV (B-Prefix)",
+            label="📥 Download Converted Master CSV (B-Prefix)",
             data=csv_bytes,
-            file_name="Item_Master_Updated_B_Prefix.csv",
+            file_name="Item_Master_B_Prefix_6Char.csv",
             mime="text/csv"
         )
 
-        existing_codes = set(export_df[code_col].dropna().astype(str).str.strip().unique())
+        existing_codes = set(converted_df[code_col].dropna().astype(str).str.strip().unique())
 
     except Exception as e:
-        st.error(f"Error reading CSV file: {e}")
+        st.error(f"Error processing CSV file: {e}")
 
 st.markdown("---")
 
-# --- 2. SINGLE CODE GENERATOR & CONVERTER ---
-st.header("2. Single Code Generator / Converter")
+# --- 2. SINGLE CODE GENERATOR ---
+st.header("2. Single Part Number Generator")
 
 category = st.selectbox(
     "Select Component Category",
@@ -93,38 +94,29 @@ prefix_map = {
     "Concrete Composite Mixes": "K"
 }
 
-target_prefix = prefix_map[category]
-
-st.info(f"Selected Category: **{category}** | Active Prefix: **`{target_prefix}`**")
+prefix = prefix_map[category]
 
 col1, col2 = st.columns(2)
 with col1:
     part_desc = st.text_input("Part Description / Name", placeholder="e.g., Refrigerator Riser Pad")
 with col2:
-    code_input = st.text_input("Enter Existing Code or Seed (e.g., F-00.00A1... or 82404)", placeholder="Leave blank for random 5-digit seed")
+    digits_input = st.text_input("5-Digit Seed (Leave blank for random)", max_chars=5)
 
-if st.button("Generate / Convert Part Number"):
-    raw_val = code_input.strip() if code_input else ""
-    
-    if raw_val:
-        # If user pasted an existing code starting with F- or F, convert it to target prefix
-        if raw_val.startswith("F-"):
-            new_code = f"{target_prefix}-" + raw_val[2:]
-        elif raw_val.startswith("F"):
-            new_code = f"{target_prefix}" + raw_val[1:]
-        elif raw_val.startswith(f"{target_prefix}-") or raw_val.startswith(target_prefix):
-            new_code = raw_val
+if st.button("Generate Part Number"):
+    if digits_input:
+        cleaned = "".join(filter(str.isdigit, str(digits_input)))
+        if len(cleaned) == 5:
+            generated_code = f"{prefix}{cleaned}"
         else:
-            # Otherwise attach the target prefix directly
-            new_code = f"{target_prefix}-{raw_val}" if "-" in raw_val else f"{target_prefix}{raw_val}"
+            st.error("Please enter exactly 5 numerical digits.")
+            st.stop()
     else:
-        # Generate random 5-digit number with target prefix
         rand_num = random.randint(10000, 99999)
-        new_code = f"{target_prefix}{rand_num}"
+        generated_code = f"{prefix}{rand_num}"
 
-    if new_code in existing_codes:
-        st.warning(f"⚠️ `{new_code}` already exists in the uploaded file!")
+    if generated_code in existing_codes:
+        st.warning(f"⚠️ `{generated_code}` already exists in the uploaded file!")
     else:
-        st.success(f"**Generated / Converted Part Number:** `{new_code}`")
+        st.success(f"**Generated Part Number:** `{generated_code}`")
 
-    st.code(f"Part No.: {new_code}\nDescription: {part_desc if part_desc else 'N/A'}", language="text")
+    st.code(f"Part No.: {generated_code}\nDescription: {part_desc if part_desc else 'N/A'}", language="text")
