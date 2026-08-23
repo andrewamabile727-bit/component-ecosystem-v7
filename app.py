@@ -1,117 +1,112 @@
 import streamlit as st
 import pandas as pd
-import random
 import re
 
-st.set_page_config(page_title="Component Ecosystem Code Generator", layout="wide")
+st.set_page_config(page_title="Waterfall BOM & Costing", layout="wide")
 
-st.title("🧩 Component Ecosystem Code Generator")
-st.markdown("Batch master code converter and 6-character part number generator.")
+st.title("Interactive Waterfall BOM & Costing Tool")
+st.markdown("Upload your updated **Item Master** and **BOM Links** (v4) to see the full roll-up.")
 
-# --- 1. BATCH FILE CONVERTER (MAIN SCREEN) ---
-st.header("1. Batch Master File Converter")
-uploaded_file = st.file_uploader("Upload Item Master / Code CSV File", type=["csv"])
-
-existing_codes = set()
-
-if uploaded_file is not None:
-    try:
-        df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
-        df.columns = [str(c).strip() for c in df.columns]
-        
-        # Detect target code column
-        code_col = next((c for c in df.columns if any(k in c.lower() for k in ["mastercode", "part", "code", "item"])), df.columns[0])
-        
-        # Non-blocking batch conversion to 6-character B-codes (B + 5 digits)
-        used_seeds = set()
-        
-        def format_to_6char_b(val, idx):
-            s = str(val).strip()
-            digits_only = re.sub(r'\D', '', s)
-            
-            if len(digits_only) >= 5:
-                seed = digits_only[:5]
-            else:
-                # Deterministic fallback to prevent infinite loops during batch processing
-                seed = f"{(idx + 10000) % 90000 + 10000}"
-            
-            used_seeds.add(seed)
-            return f"B{seed}"
-
-        # Apply conversion cleanly
-        converted_df = df.copy()
-        converted_df[code_col] = [format_to_6char_b(val, i) for i, val in enumerate(df[code_col])]
-
-        # Display clean converted dataframe directly
-        st.dataframe(converted_df, use_container_width=True, hide_index=True)
-
-        # One-click download button for converted CSV
-        csv_bytes = converted_df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(
-            label="📥 Download Converted Master CSV (B-Prefix)",
-            data=csv_bytes,
-            file_name="Item_Master_B_Prefix_6Char.csv",
-            mime="text/csv"
-        )
-
-        existing_codes = set(converted_df[code_col].dropna().astype(str).str.strip().unique())
-
-    except Exception as e:
-        st.error(f"Error processing CSV file: {e}")
-
-st.markdown("---")
-
-# --- 2. SINGLE CODE GENERATOR ---
-st.header("2. Single Part Number Generator")
-
-category = st.selectbox(
-    "Select Component Category",
-    [
-        "Mounting & Accessory Parts",
-        "Frame Tubes",
-        "Sheet Metal & Sheaths",
-        "Interior Lining & Wall Coverings",
-        "Trim & Corner Guards",
-        "J-Channels & Edge Extrusions",
-        "Fasteners & Hardware",
-        "Concrete Composite Mixes"
-    ]
-)
-
-prefix_map = {
-    "Mounting & Accessory Parts": "B",
-    "Frame Tubes": "F",
-    "Sheet Metal & Sheaths": "S",
-    "Interior Lining & Wall Coverings": "I",
-    "Trim & Corner Guards": "T",
-    "J-Channels & Edge Extrusions": "J",
-    "Fasteners & Hardware": "K",
-    "Concrete Composite Mixes": "K"
-}
-
-prefix = prefix_map[category]
-
+# File uploaders
 col1, col2 = st.columns(2)
 with col1:
-    part_desc = st.text_input("Part Description / Name", placeholder="e.g., Refrigerator Riser Pad")
+    master_file = st.file_uploader("Upload Item Master (v4)", type=["csv"])
 with col2:
-    digits_input = st.text_input("5-Digit Seed (Leave blank for random)", max_chars=5)
+    links_file = st.file_uploader("Upload BOM Links (v4)", type=["csv"])
 
-if st.button("Generate Part Number"):
-    if digits_input:
-        cleaned = "".join(filter(str.isdigit, str(digits_input)))
-        if len(cleaned) == 5:
-            generated_code = f"{prefix}{cleaned}"
+def clean_currency(value):
+    """Helper to clean '$' and commas from the Unit Cost strings."""
+    if isinstance(value, str):
+        return float(re.sub(r'[^\d.]', '', value))
+    return float(value)
+
+if master_file and links_file:
+    # Load Data
+    df_master = pd.read_csv(master_file)
+    df_links = pd.read_csv(links_file)
+
+    # Clean Data
+    df_master['Part No.'] = df_master['Part No.'].astype(str).str.strip()
+    df_master['Unit Cost'] = df_master['Unit Cost'].apply(clean_currency)
+    
+    df_links['Parent Part'] = df_links['Parent Part'].astype(str).str.strip()
+    df_links['Child Part'] = df_links['Child Part'].astype(str).str.strip()
+    # Fill missing Qty with 1
+    df_links['Qty Per'] = pd.to_numeric(df_links['Qty Per'], errors='coerce').fillna(1.0)
+    
+    # Dictionaries for lookup
+    item_details = df_master.set_index('Part No.').to_dict('index')
+    
+    # Map Parent to its children: { 'ParentID': [(ChildID, Qty), ...] }
+    parent_map = {}
+    for _, row in df_links.iterrows():
+        p, c, q = row['Parent Part'], row['Child Part'], row['Qty Per']
+        if p not in parent_map:
+            parent_map[p] = []
+        parent_map[p].append((c, q))
+
+    # Identify Top-Level (L0) SKUs
+    all_parents = set(df_links['Parent Part'].unique())
+    all_children = set(df_links['Child Part'].unique())
+    l0_skus = sorted(list(all_parents - all_children))
+
+    selected_l0 = st.selectbox("Select L0 Saleable SKU", ["-- Select SKU --"] + l0_skus)
+
+    if selected_l0 != "-- Select SKU --":
+        waterfall = []
+
+        def explode_bom(parent_id, current_depth=0, multiplier=1):
+            children = parent_map.get(parent_id, [])
+            for child_id, qty_per in children:
+                # Calculate total qty needed based on parent multiplier
+                total_qty = multiplier * qty_per
+                
+                # Fetch details from Item Master
+                details = item_details.get(child_id, {})
+                desc = details.get('Part Description', "UNKNOWN")
+                u_cost = details.get('Unit Cost', 0.0)
+                category = details.get('Category', "N/A")
+                ext_cost = u_cost * total_qty
+                
+                # Visual hierarchy string
+                indent = "    " * current_depth
+                
+                waterfall.append({
+                    'Visual Tree': f"{indent}↳ {child_id}",
+                    'Part No.': child_id,
+                    'Description': desc,
+                    'Category': category,
+                    'Qty Per': qty_per,
+                    'Total Req.': total_qty,
+                    'Unit Cost': f"${u_cost:,.2f}",
+                    'Ext. Cost': ext_cost
+                })
+                
+                # Recurse if the child is also a parent
+                explode_bom(child_id, current_depth + 1, total_qty)
+
+        # Trigger the waterfall
+        explode_bom(selected_l0)
+        
+        if waterfall:
+            wf_df = pd.DataFrame(waterfall)
+            
+            # Summary Metrics
+            total_sku_cost = wf_df['Ext. Cost'].sum()
+            total_parts = wf_df['Total Req.'].sum()
+            
+            m1, m2 = st.columns(2)
+            m1.metric("Total Roll-up Cost", f"${total_sku_cost:,.2f}")
+            m2.metric("Total Component Count", f"{int(total_parts)} units")
+            
+            # Formatting for display
+            display_df = wf_df.copy()
+            display_df['Ext. Cost'] = display_df['Ext. Cost'].apply(lambda x: f"${x:,.2f}")
+            
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            # CSV Download
+            csv_data = wf_df.to_csv(index=False).encode('utf-8')
+            st.download_button(f"Export {selected_l0} Waterfall", csv_data, f"BOM_{selected_l0}.csv", "text/csv")
         else:
-            st.error("Please enter exactly 5 numerical digits.")
-            st.stop()
-    else:
-        rand_num = random.randint(10000, 99999)
-        generated_code = f"{prefix}{rand_num}"
-
-    if generated_code in existing_codes:
-        st.warning(f"⚠️ `{generated_code}` already exists in the uploaded file!")
-    else:
-        st.success(f"**Generated Part Number:** `{generated_code}`")
-
-    st.code(f"Part No.: {generated_code}\nDescription: {part_desc if part_desc else 'N/A'}", language="text")
+            st.warning("No children found for this SKU in the BOM Links.")
