@@ -3,7 +3,7 @@ import pandas as pd
 import random
 import re
 
-st.set_page_config(page_title="Component Ecosystem Code Generator v7.5", layout="wide")
+st.set_page_config(page_title="Component Ecosystem Code Generator", layout="wide")
 
 st.title("🧩 Component Ecosystem Code Generator")
 st.markdown("Batch master code converter and 6-character part number generator.")
@@ -19,38 +19,33 @@ if uploaded_file is not None:
         df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
         df.columns = [str(c).strip() for c in df.columns]
         
-        # Detect part number column
+        # Detect target code column
         code_col = next((c for c in df.columns if any(k in c.lower() for k in ["mastercode", "part", "code", "item"])), df.columns[0])
         
-        # Function to generate 6-character B-code (B + 5 digits)
+        # Non-blocking batch conversion to 6-character B-codes (B + 5 digits)
         used_seeds = set()
         
-        def format_to_6char_b(val):
+        def format_to_6char_b(val, idx):
             s = str(val).strip()
-            # Extract digits from the input string
             digits_only = re.sub(r'\D', '', s)
             
             if len(digits_only) >= 5:
-                # Take 5 digits
-                seed = digits_only[:5] if len(digits_only) == 5 else digits_only[-5:]
+                seed = digits_only[:5]
             else:
-                # Generate unique 5 digits if fewer than 5 exist
-                while True:
-                    seed = str(random.randint(10000, 99999))
-                    if seed not in used_seeds:
-                        break
+                # Deterministic fallback to prevent infinite loops during batch processing
+                seed = f"{(idx + 10000) % 90000 + 10000}"
             
             used_seeds.add(seed)
             return f"B{seed}"
 
-        # Apply conversion
+        # Apply conversion cleanly
         converted_df = df.copy()
-        converted_df[code_col] = [format_to_6char_b(val) for val in df[code_col]]
+        converted_df[code_col] = [format_to_6char_b(val, i) for i, val in enumerate(df[code_col])]
 
-        # Display converted table
+        # Display clean converted dataframe directly
         st.dataframe(converted_df, use_container_width=True, hide_index=True)
 
-        # Download button for converted file
+        # One-click download button for converted CSV
         csv_bytes = converted_df.to_csv(index=False).encode('utf-8-sig')
         st.download_button(
             label="📥 Download Converted Master CSV (B-Prefix)",
