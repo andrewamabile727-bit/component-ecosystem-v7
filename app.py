@@ -1,75 +1,72 @@
 import streamlit as st
 import pandas as pd
 import random
-import io
 
-st.set_page_config(page_title="Component Ecosystem Code Generator v7.3", layout="wide")
+st.set_page_config(page_title="Component Ecosystem Code Generator v7.4", layout="wide")
 
-st.title("🧩 Component Ecosystem Code Generator v7.3")
-st.markdown("Standardized part number generator and batch code converter.")
+st.title("🧩 Component Ecosystem Code Generator v7.4")
+st.markdown("Standardized part number generator and prefix converter (`F` → `B`).")
 
-# --- 1. MAIN SCREEN FILE UPLOAD & BATCH CONVERTER ---
-st.header("1. Batch Master File Processing")
-uploaded_file = st.file_uploader("Upload Item Master / Component CSV File", type=["csv"])
+# --- 1. BATCH FILE PROCESSING & CONVERTER ---
+st.header("1. Batch Master File Converter")
+uploaded_file = st.file_uploader("Upload Master File / Code CSV", type=["csv"])
 
-master_df = None
-existing_part_numbers = set()
+existing_codes = set()
 
 if uploaded_file is not None:
     try:
-        master_df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
-        master_df.columns = [str(c).strip() for c in master_df.columns]
+        df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
+        df.columns = [str(c).strip() for c in df.columns]
         
-        # Identify Part No and Category/Description columns
-        part_col = next((c for c in master_df.columns if "Part No" in c or "Item No" in c), master_df.columns[0])
-        desc_col = next((c for c in master_df.columns if "Desc" in c), master_df.columns[1] if len(master_df.columns) > 1 else master_df.columns[0])
+        # Auto-detect code column (MasterCode, Part No, or first column)
+        code_col = next((c for c in df.columns if any(k in c.lower() for k in ["mastercode", "part", "code", "item"])), df.columns[0])
         
-        st.success(f"Loaded CSV file successfully ({len(master_df)} total records found).")
+        st.success(f"File loaded successfully. Detected target column: `{code_col}` ({len(df)} records).")
 
-        # Automatically update any Mounting & Accessory F-codes to B-codes in batch
-        updated_df = master_df.copy()
+        # Conversion logic for both structured (F-00.00...) and simple (F12345) codes
+        def convert_code(val):
+            s = str(val).strip()
+            if s.startswith("F-"):
+                return "B-" + s[2:]
+            elif s.startswith("F"):
+                return "B" + s[1:]
+            return s
+
+        # Generate converted column
+        converted_df = df.copy()
+        converted_df["Original_Code"] = df[code_col]
+        converted_df[code_col] = df[code_col].apply(convert_code)
+
+        # Show comparison view
+        st.subheader("Conversion Preview (F → B Prefix Swap)")
         
-        def convert_mounting_prefix(part_str, desc_str):
-            part_str = str(part_str).strip()
-            desc_str = str(desc_str).strip().lower()
-            
-            # Check if part starts with F and is a mounting/accessory item
-            # OR convert F to B for 5-digit numerical seeds if specified
-            if part_str.startswith('F') and len(part_str) == 6 and part_str[1:].isdigit():
-                # Swap F to B
-                return f"B{part_str[1:]}"
-            return part_str
+        diff_count = (converted_df["Original_Code"] != converted_df[code_col]).sum()
+        st.info(f"Updated **{diff_count}** part numbers to the **`B`** prefix while preserving all remaining digits and characters.")
 
-        # Option to perform automatic batch prefix conversion
-        st.subheader("Batch Prefix Conversion (F → B for Mounting Parts)")
-        if st.checkbox("Automatically convert 'F' prefix to 'B' prefix for 5-digit parts", value=True):
-            updated_df[part_col] = [
-                convert_mounting_prefix(p, d) 
-                for p, d in zip(updated_df[part_col], updated_df[desc_col])
-            ]
-            st.info("Updated Part Numbers starting with 'F' to 'B' across the loaded table.")
+        # Display preview table
+        preview_cols = ["Original_Code", code_col] + [c for c in df.columns if c != code_col]
+        st.dataframe(converted_df[preview_cols], use_container_width=True, hide_index=True)
 
-        # Display full updated dataframe
-        st.dataframe(updated_df, use_container_width=True, hide_index=True)
-
-        # Download button for updated CSV
-        csv_bytes = updated_df.to_csv(index=False).encode('utf-8-sig')
+        # Download clean CSV with updated codes
+        export_df = converted_df.drop(columns=["Original_Code"])
+        csv_bytes = export_df.to_csv(index=False).encode('utf-8-sig')
+        
         st.download_button(
-            label="📥 Download Updated Master CSV",
+            label="📥 Download Converted CSV (B-Prefix)",
             data=csv_bytes,
             file_name="Item_Master_Updated_B_Prefix.csv",
             mime="text/csv"
         )
 
-        existing_part_numbers = set(updated_df[part_col].dropna().astype(str).str.strip().unique())
+        existing_codes = set(export_df[code_col].dropna().astype(str).str.strip().unique())
 
     except Exception as e:
-        st.error(f"Error processing file: {e}")
+        st.error(f"Error reading CSV file: {e}")
 
 st.markdown("---")
 
-# --- 2. SINGLE PART NUMBER GENERATOR ---
-st.header("2. Single Part Number Generator")
+# --- 2. SINGLE CODE GENERATOR & CONVERTER ---
+st.header("2. Single Code Generator / Converter")
 
 category = st.selectbox(
     "Select Component Category",
@@ -96,33 +93,38 @@ prefix_map = {
     "Concrete Composite Mixes": "K"
 }
 
-prefix = prefix_map[category]
+target_prefix = prefix_map[category]
 
-st.info(f"Category: **{category}** | Selected Prefix: **{prefix}** (Outputs e.g., `{prefix}12345`)")
+st.info(f"Selected Category: **{category}** | Active Prefix: **`{target_prefix}`**")
 
 col1, col2 = st.columns(2)
 with col1:
     part_desc = st.text_input("Part Description / Name", placeholder="e.g., Refrigerator Riser Pad")
 with col2:
-    digits_input = st.text_input("5-Digit Seed (Leave blank for random)", max_chars=5)
+    code_input = st.text_input("Enter Existing Code or Seed (e.g., F-00.00A1... or 82404)", placeholder="Leave blank for random 5-digit seed")
 
-if st.button("Generate Part Number"):
-    if digits_input:
-        cleaned = "".join(filter(str.isdigit, str(digits_input)))
-        if len(cleaned) == 5:
-            generated_code = f"{prefix}{cleaned}"
+if st.button("Generate / Convert Part Number"):
+    raw_val = code_input.strip() if code_input else ""
+    
+    if raw_val:
+        # If user pasted an existing code starting with F- or F, convert it to target prefix
+        if raw_val.startswith("F-"):
+            new_code = f"{target_prefix}-" + raw_val[2:]
+        elif raw_val.startswith("F"):
+            new_code = f"{target_prefix}" + raw_val[1:]
+        elif raw_val.startswith(f"{target_prefix}-") or raw_val.startswith(target_prefix):
+            new_code = raw_val
         else:
-            st.error("Please enter exactly 5 numerical digits.")
-            st.stop()
+            # Otherwise attach the target prefix directly
+            new_code = f"{target_prefix}-{raw_val}" if "-" in raw_val else f"{target_prefix}{raw_val}"
     else:
-        # Generate random unique 5-digit number
+        # Generate random 5-digit number with target prefix
         rand_num = random.randint(10000, 99999)
-        generated_code = f"{prefix}{rand_num}"
+        new_code = f"{target_prefix}{rand_num}"
 
-    # Duplicate check against uploaded file
-    if generated_code in existing_part_numbers:
-        st.warning(f"⚠️ `{generated_code}` already exists in your uploaded file!")
+    if new_code in existing_codes:
+        st.warning(f"⚠️ `{new_code}` already exists in the uploaded file!")
     else:
-        st.success(f"**Generated Part Number:** `{generated_code}`")
+        st.success(f"**Generated / Converted Part Number:** `{new_code}`")
 
-    st.code(f"Part No.: {generated_code}\nDescription: {part_desc if part_desc else 'N/A'}", language="text")
+    st.code(f"Part No.: {new_code}\nDescription: {part_desc if part_desc else 'N/A'}", language="text")
