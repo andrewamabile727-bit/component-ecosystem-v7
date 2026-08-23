@@ -39,11 +39,11 @@ category = st.sidebar.selectbox("Category Navigation", [
 
 # --- 3. DYNAMIC LOGIC MAPPING ---
 def process_data(df, category_name):
-    cat_prefix = category_name.split(":")[0]
+    prefix = category_name.split(":")[0]
     col_out = category_name.split(": ")[1]
     
     # Required Column: Level 0 has 4 inputs, all others use 'MasterCode'
-    required_cols = ['Base Assy Kit', 'Countertop Assy Kit', 'Cladding Assy Kit', 'Finish Kit'] if cat_prefix == "0" else ['MasterCode']
+    required_cols = ['Base Assy Kit', 'Countertop Assy Kit', 'Cladding Assy Kit', 'Finish Kit'] if prefix == "0" else ['MasterCode']
     
     missing = [c for c in required_cols if c not in df.columns]
     if missing:
@@ -55,55 +55,53 @@ def process_data(df, category_name):
             code = str(row.get('MasterCode', '')).upper().strip()
             seg = [s.strip() for s in code.split('-')]
             
-            # Use 'B' prefix if MasterCode starts with 'B-', otherwise use category number
-            output_prefix = "B" if code.startswith("B-") else cat_prefix
-
             # --- CATEGORY 0: MASTER SKU ---
-            if cat_prefix == "0":
+            if prefix == "0":
                 base, top = str(row.get('Base Assy Kit', '')), str(row.get('Countertop Assy Kit', ''))
                 clad, fin = str(row.get('Cladding Assy Kit', '')), str(row.get('Finish Kit', ''))
                 n2_val = base[1] if len(base) > 1 else '0'
                 return f"0{n2_val}{poly_hash_v6(base + top + clad + fin)}-01"
             
             # --- CATEGORY 1, 2, 3: KIT LOGIC ---
-            elif cat_prefix in ["1", "2", "3"]:
+            elif prefix in ["1", "2", "3"]:
                 match = re.search(r'\d(\d)', code)
                 n2_val = match.group(1) if match else "0"
-                return f"{output_prefix}{n2_val}{poly_hash_v6(code)}-01"
+                return f"{prefix}{n2_val}{poly_hash_v6(code)}-01"
             
             # --- CATEGORY 4: FINISH KIT ---
-            elif cat_prefix == "4":
+            elif prefix == "4":
                 n2_val = extract_n2(seg[1]) if len(seg) > 1 else 0
-                return f"{output_prefix}{n2_val}{poly_hash_v6(code)}-01"
+                return f"4{n2_val}{poly_hash_v6(code)}-01"
 
-            # --- CATEGORY 5: CLADDING ASSY ---
-            elif cat_prefix == "5":
-                if code.startswith('O-') or code.startswith('B-'):
-                    cleaned_code = code[2:].replace("-", "") if (code.startswith('O-') or code.startswith('B-')) else code.replace("-", "")
+            # --- CATEGORY 5: CLADDING ASSY (V6.1 UPDATED) ---
+            elif prefix == "5":
+                # Input: O-61025-01-71815-01 -> Cleaned: 61025017181501
+                # This matches the original 'Panel + Backer' DNA perfectly.
+                if code.startswith('O-'):
+                    cleaned_code = code[2:].replace("-", "")
                     n2_val = cleaned_code[1] if len(cleaned_code) > 1 else '0'
-                    return f"{output_prefix}{n2_val}{poly_hash_v6(cleaned_code)}-01"
-                return "FORMAT ERROR: Start with O- or B-"
+                    return f"5{n2_val}{poly_hash_v6(cleaned_code)}-01"
+                return "FORMAT ERROR: Start with O-"
             
             # --- CATEGORY 6, 7: COMPONENTS ---
-            elif cat_prefix in ["6", "7"]:
+            elif prefix in ["6", "7"]:
                 n2_val = extract_n2(seg[1]) if len(seg) > 1 else 0
-                return f"{output_prefix}{n2_val}{poly_hash_v6(''.join(seg[:4]))}-01"
+                return f"{prefix}{n2_val}{poly_hash_v6(''.join(seg[:4]))}-01"
 
             # --- CATEGORY 8: COUNTERTOP ---
-            elif cat_prefix == "8":
+            elif prefix == "8":
                 n2_val = extract_n2(seg[1]) if len(seg) > 1 else 0
-                return f"{output_prefix}{n2_val}{poly_hash_v6(''.join(seg[:3]))}-01"
+                return f"8{n2_val}{poly_hash_v6(''.join(seg[:3]))}-01"
             
             # --- CATEGORY 9: FRAME ---
-            elif cat_prefix == "9":
+            elif prefix == "9":
                 n2_val = extract_n2(seg[1]) if len(seg) > 1 else 0
                 fp = poly_hash_v6("".join(seg[:4]))
                 rev = alpha_to_pos(seg[4]) if len(seg) > 4 else 1
-                return f"{output_prefix}{n2_val}{fp}-{rev:02d}"
+                return f"9{n2_val}{fp}-{rev:02d}"
 
             return "UNKNOWN"
-        except Exception: 
-            return "ERROR"
+        except Exception: return "ERROR"
 
     df[col_out] = df.apply(get_id, axis=1)
     return df
