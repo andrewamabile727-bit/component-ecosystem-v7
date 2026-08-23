@@ -115,7 +115,7 @@ if uploaded_file is not None:
             cols = ["Generated_Part_No"] + [c for c in processed_df.columns if c != "Generated_Part_No"]
             st.session_state.processed_df = processed_df[cols]
 
-        # Display results from session_state so they never disappear on download
+        # Display results from session_state so they remain on screen
         if st.session_state.processed_df is not None:
             st.markdown("### Processed Batch Results (Hash Logic)")
             st.dataframe(st.session_state.processed_df, use_container_width=True, hide_index=True)
@@ -124,8 +124,10 @@ if uploaded_file is not None:
             safe_category_name = category.replace(" & ", "_").replace(" ", "_")
             file_name = f"{safe_category_name}_Generated_Codes.csv"
 
-            # Export using clean UTF-8-sig encoding so Excel reads it properly without file errors
-            csv_bytes = st.session_state.processed_df.to_csv(index=False).encode('utf-8-sig')
+            # Convert to CSV string with explicit Windows line endings (\r\n) for Excel compatibility
+            csv_string = st.session_state.processed_df.to_csv(index=False, line_terminator='\r\n')
+            csv_bytes = csv_string.encode('utf-8-sig')
+
             st.download_button(
                 label=f"📥 Download Processed {category} CSV",
                 data=csv_bytes,
