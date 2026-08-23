@@ -8,7 +8,13 @@ st.set_page_config(page_title="Component Ecosystem Code Generator", layout="wide
 st.title("🧩 Component Ecosystem Code Generator")
 st.markdown("Standardized part number generator and batch code processor.")
 
-# --- 1. CATEGORY NAVIGATION ---
+# --- 1. SESSION STATE INITIALIZATION ---
+if "processed_df" not in st.session_state:
+    st.session_state.processed_df = None
+if "current_category" not in st.session_state:
+    st.session_state.current_category = ""
+
+# --- 2. CATEGORY NAVIGATION ---
 category = st.sidebar.selectbox(
     "Select Category Generator",
     [
@@ -23,9 +29,14 @@ category = st.sidebar.selectbox(
     ]
 )
 
-# --- 2. PREFIX MAPPING ---
+# Reset session state if category changes
+if st.session_state.current_category != category:
+    st.session_state.processed_df = None
+    st.session_state.current_category = category
+
+# --- 3. PREFIX MAPPING ---
 prefix_map = {
-    "Mounting & Accessory Parts": "B",  # B-Prefix for Mounting & Accessory Parts
+    "Mounting & Accessory Parts": "B",  # B-Prefix
     "Frame Tubes": "F",
     "Sheet Metal & Sheaths": "S",
     "Interior Lining & Wall Coverings": "I",
@@ -38,25 +49,36 @@ prefix_map = {
 prefix = prefix_map[category]
 
 st.header(f"Generator: {category}")
-st.info(f"Outputs 6-character part numbers starting with **{prefix}** (e.g., `{prefix}12345`).")
+st.info(f"Outputs 6-character part numbers starting with **{prefix}** (e.g., `{prefix}82404`).")
 
-# --- 3. SINGLE CODE GENERATOR ---
+# --- 4. MASTER CODE HASHING ENGINE ---
+def hash_to_5_digits(string):
+    """Deterministic hashing logic to convert MasterCode into a unique 5-digit seed."""
+    h = 0
+    clean_str = str(string).upper().replace("-", "")
+    for char in clean_str:
+        h = (h * 53 + ord(char))
+    h += len(clean_str)
+    return f"{h % 100000:05d}"
+
+# --- 5. SINGLE CODE GENERATOR ---
 st.subheader("Generate Single Part Number")
 
 col1, col2 = st.columns(2)
 with col1:
     part_desc = st.text_input("Part Description / Name", placeholder="e.g., Refrigerator Riser Pad")
 with col2:
-    digits_input = st.text_input("5-Digit Seed (Leave blank for random)", max_chars=5)
+    master_or_seed = st.text_input("Enter MasterCode or 5-Digit Seed (Leave blank for random)")
 
 if st.button("Generate Single Part Number"):
-    if digits_input:
-        cleaned = "".join(filter(str.isdigit, str(digits_input)))
-        if len(cleaned) == 5:
-            generated_code = f"{prefix}{cleaned}"
+    raw_val = master_or_seed.strip()
+    
+    if raw_val:
+        if len(raw_val) == 5 and raw_val.isdigit():
+            generated_code = f"{prefix}{raw_val}"
         else:
-            st.error("Please enter exactly 5 numerical digits.")
-            st.stop()
+            seed = hash_to_5_digits(raw_val)
+            generated_code = f"{prefix}{seed}"
     else:
         rand_num = random.randint(10000, 99999)
         generated_code = f"{prefix}{rand_num}"
@@ -66,14 +88,10 @@ if st.button("Generate Single Part Number"):
 
 st.markdown("---")
 
-# --- 4. BATCH GENERATOR & DOWNLOAD ---
+# --- 6. BATCH GENERATOR & PERSISTENT VIEW ---
 st.header("Master File Batch Generator")
 
-col_up1, col_up2 = st.columns([2, 1])
-with col_up1:
-    uploaded_file = st.file_uploader(f"Upload Item Master / Code CSV for {category}", type=["csv"])
-with col_up2:
-    start_seed_input = st.text_input("Starting 5-Digit Seed (Default: 10001)", value="10001", max_chars=5)
+uploaded_file = st.file_uploader(f"Upload Item Master / Code CSV for {category}", type=["csv"])
 
 if uploaded_file is not None:
     try:
@@ -81,43 +99,33 @@ if uploaded_file is not None:
         df.columns = [str(c).strip() for c in df.columns]
         
         st.success(f"Loaded CSV successfully ({len(df)} records found).")
-        st.dataframe(df, use_container_width=True, hide_index=True)
 
-        # Action Button to Process Batch
-        if st.button("🚀 Generate Unique Part Numbers for Uploaded List"):
-            # Parse starting seed
-            cleaned_start = "".join(filter(str.isdigit, str(start_seed_input)))
-            current_seed = int(cleaned_start) if len(cleaned_start) == 5 else 10001
+        # Process Batch when button is clicked and store in session_state
+        if st.button("🚀 Process MasterCodes for Uploaded List"):
+            code_col = df.columns[0]
             
             generated_codes = []
-            used_codes = set()
-
-            # Assign sequential unique codes to every row to guarantee zero duplicates
-            for _ in range(len(df)):
-                while True:
-                    candidate = f"{prefix}{current_seed:05d}"
-                    current_seed += 1
-                    if candidate not in used_codes:
-                        used_codes.add(candidate)
-                        generated_codes.append(candidate)
-                        break
+            for val in df[code_col]:
+                seed = hash_to_5_digits(val)
+                generated_codes.append(f"{prefix}{seed}")
 
             processed_df = df.copy()
             processed_df["Generated_Part_No"] = generated_codes
 
-            # Move Generated_Part_No to the first column for easy reading
             cols = ["Generated_Part_No"] + [c for c in processed_df.columns if c != "Generated_Part_No"]
-            processed_df = processed_df[cols]
+            st.session_state.processed_df = processed_df[cols]
 
-            st.markdown("### Processed Batch Results (Guaranteed Unique)")
-            st.dataframe(processed_df, use_container_width=True, hide_index=True)
+        # Display results from session_state so they never disappear on download
+        if st.session_state.processed_df is not None:
+            st.markdown("### Processed Batch Results (Hash Logic)")
+            st.dataframe(st.session_state.processed_df, use_container_width=True, hide_index=True)
 
-            # Generate Clean File Name (Removing "&" and spaces)
+            # Generate Safe Clean File Name
             safe_category_name = category.replace(" & ", "_").replace(" ", "_")
             file_name = f"{safe_category_name}_Generated_Codes.csv"
 
-            # Generate Download Button using standard utf-8 to prevent Excel errors
-            csv_bytes = processed_df.to_csv(index=False).encode('utf-8')
+            # Export using clean UTF-8-sig encoding so Excel reads it properly without file errors
+            csv_bytes = st.session_state.processed_df.to_csv(index=False).encode('utf-8-sig')
             st.download_button(
                 label=f"📥 Download Processed {category} CSV",
                 data=csv_bytes,
