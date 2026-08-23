@@ -1,73 +1,114 @@
 import streamlit as st
-import pandas as pd
-import io
+import random
 
-# --- 1. ENGINE V7.0 (THE BRAIN) ---
-def poly_hash_v7(string_in, modulo=100000):
-    """Generates a 5-digit unique numerical code (00000-99999)"""
-    h = 0
-    # Removes dashes, spaces, and makes everything uppercase for a perfect match
-    clean_str = str(string_in).upper().replace("-", "").replace(" ", "")
-    for char in clean_str:
-        h = (h * 53 + ord(char))
-    h += len(clean_str)
-    return f"{h % modulo:05d}"
+st.set_page_config(page_title="Component Ecosystem Code Generator v7.1", layout="wide")
 
-# --- 2. APP CONFIGURATION ---
-st.set_page_config(page_title="Component Ecosystem v7.0", layout="wide")
-st.title("🧩 Component Ecosystem v7.0")
-st.markdown("### Sub-Tier & Component Level Master Control")
+st.title("🧩 Component Ecosystem Code Generator v7.1")
+st.markdown("Generate standardized, unique part numbers for manufactured and purchased components.")
 
-# Sidebar for Category selection
-category_data = {
-    "Frame Tubes": "F",
-    "Connector Comp.": "M",
-    "Connector Assy": "N",
-    "Ext. Cabinet Sheathing": "S",
-    "Int. Cabinet Sheathing": "I",
-    "Trim": "T",
-    "J-Channel": "J",
-    "Mounting & Accessory Parts": "B",
-    "Packaging": "R",
-    "Accessories/UX Kit": "U",
-    "OTS Base Level Components": "K"  # New Addition
-}
+# Sidebar Navigation
+category = st.sidebar.selectbox(
+    "Select Category Generator",
+    [
+        "Mounting & Accessory Parts",
+        "Frame Tubes",
+        "Sheet Metal & Sheaths",
+        "Interior Lining & Wall Coverings",
+        "Trim & Corner Guards",
+        "J-Channels & Edge Extrusions",
+        "Fasteners & Hardware",
+        "Concrete Composite Mixes"
+    ]
+)
 
-category = st.sidebar.selectbox("Select Component Category", list(category_data.keys()))
-prefix = category_data[category]
+st.header(f"Generator: {category}")
 
-# --- 3. DATA PROCESSING ---
-uploaded_file = st.file_uploader(f"Upload {category} CSV", type="csv")
+# ---------------------------------------------------------
+# 1. MOUNTING & ACCESSORY PARTS (UPDATED TO PREFIX 'B')
+# ---------------------------------------------------------
+if category == "Mounting & Accessory Parts":
+    st.subheader("Mounting & Accessory Parts Part Number Generator")
+    st.info("Generates 5-digit part numbers starting with **B** (e.g., B12345).")
 
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
+    part_desc = st.text_input("Part Description / Name", placeholder="e.g., Refrigerator Riser Pad")
     
-    # 5th Grade Safety Check: Make sure the MasterCode column exists
-    if "MasterCode" not in df.columns:
-        st.error("❌ Error: Your CSV file is missing the 'MasterCode' column!")
-        st.info("Please rename your column to 'MasterCode' and try again.")
-    else:
-        if st.button("🚀 Generate Component IDs"):
-            # Create the ID: Hard Prefix + 5-digit number
-            df['Component ID'] = df['MasterCode'].apply(lambda x: f"{prefix}{poly_hash_v7(x)}")
-            
-            # Check for duplications (Twin Check)
-            duplicates = df.duplicated(subset=['Component ID']).sum()
-            
-            st.success(f"✅ IDs Generated for {category}!")
-            
-            if duplicates > 0:
-                st.warning(f"⚠️ Warning: Found {duplicates} duplicate IDs in this list.")
+    # Custom or random 5-digit seed
+    digits = st.text_input("5-Digit Seed (Leave blank for random)", max_chars=5)
+
+    if st.button("Generate Part Number"):
+        if not digits:
+            rand_num = random.randint(10000, 99999)
+        else:
+            # Clean non-digit characters if entered
+            cleaned_digits = "".join(filter(str.isdigit, digits))
+            if len(cleaned_digits) == 5:
+                rand_num = cleaned_digits
             else:
-                st.info("✨ Clean Batch: Zero duplicates detected.")
-            
-            st.dataframe(df)
-            
-            # Download Button
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Component List",
-                data=csv,
-                file_name=f"{category.replace(' ', '_')}_Export.csv",
-                mime='text/csv'
-            )
+                st.error("Please enter exactly 5 numerical digits.")
+                st.stop()
+
+        # Prefix forced to 'B' to avoid collision with Frame Tubes ('F')
+        part_no = f"B{rand_num}"
+        
+        st.success(f"**Generated Part Number:** `{part_no}`")
+        st.code(f"Part No.: {part_no}\nDescription: {part_desc if part_desc else 'N/A'}", language="text")
+
+# ---------------------------------------------------------
+# 2. FRAME TUBES (KEEP PREFIX 'F')
+# ---------------------------------------------------------
+elif category == "Frame Tubes":
+    st.subheader("Frame Tubes Part Number Generator")
+    st.info("Generates 5-digit part numbers starting with **F** (e.g., F12345).")
+
+    part_desc = st.text_input("Frame Tube Description", placeholder="e.g., Lower Horizontal Frame Support")
+    digits = st.text_input("5-Digit Seed (Leave blank for random)", max_chars=5)
+
+    if st.button("Generate Part Number"):
+        if not digits:
+            rand_num = random.randint(10000, 99999)
+        else:
+            cleaned_digits = "".join(filter(str.isdigit, digits))
+            if len(cleaned_digits) == 5:
+                rand_num = cleaned_digits
+            else:
+                st.error("Please enter exactly 5 numerical digits.")
+                st.stop()
+
+        part_no = f"F{rand_num}"
+        st.success(f"**Generated Part Number:** `{part_no}`")
+        st.code(f"Part No.: {part_no}\nDescription: {part_desc if part_desc else 'N/A'}", language="text")
+
+# ---------------------------------------------------------
+# 3. OTHER CATEGORIES (STANDARDIZED PREFIXES)
+# ---------------------------------------------------------
+else:
+    prefix_map = {
+        "Sheet Metal & Sheaths": "S",
+        "Interior Lining & Wall Coverings": "I",
+        "Trim & Corner Guards": "T",
+        "J-Channels & Edge Extrusions": "J",
+        "Fasteners & Hardware": "K",
+        "Concrete Composite Mixes": "K"
+    }
+    
+    p_prefix = prefix_map.get(category, "X")
+    st.subheader(f"{category} Part Number Generator")
+    st.info(f"Generates 5-digit part numbers starting with **{p_prefix}** (e.g., {p_prefix}12345).")
+
+    part_desc = st.text_input("Item Description", placeholder="Enter item description...")
+    digits = st.text_input("5-Digit Seed (Leave blank for random)", max_chars=5)
+
+    if st.button("Generate Part Number"):
+        if not digits:
+            rand_num = random.randint(10000, 99999)
+        else:
+            cleaned_digits = "".join(filter(str.isdigit, digits))
+            if len(cleaned_digits) == 5:
+                rand_num = cleaned_digits
+            else:
+                st.error("Please enter exactly 5 numerical digits.")
+                st.stop()
+
+        part_no = f"{p_prefix}{rand_num}"
+        st.success(f"**Generated Part Number:** `{part_no}`")
+        st.code(f"Part No.: {part_no}\nDescription: {part_desc if part_desc else 'N/A'}", language="text")
