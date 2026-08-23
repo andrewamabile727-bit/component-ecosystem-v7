@@ -1,120 +1,122 @@
 import streamlit as st
 import pandas as pd
-import random
 import re
+import io
 
-st.set_page_config(page_title="Component Ecosystem Code Generator v7.1", layout="wide")
+# --- 1. ENGINE V6.1 (THE BRAIN) ---
+def poly_hash_v6(string, modulo=1000):
+    h = 0
+    clean_str = str(string).upper().replace("-", "")
+    for char in clean_str:
+        h = (h * 53 + ord(char))
+    h += len(clean_str)
+    return f"{h % modulo:03d}"
 
-st.title("🧩 Component Ecosystem Code Generator v7.1")
-st.markdown("Standardized part number generator and batch code processor.")
+def extract_n2(segment):
+    nums = re.findall(r'\d+', str(segment))
+    if nums:
+        val = sum(int(n) for n in nums[:2])
+        return val % 10
+    return 0
 
-# --- 1. CATEGORY NAVIGATION ---
-category = st.sidebar.selectbox(
-    "Select Category Generator",
-    [
-        "Mounting & Accessory Parts",
-        "Frame Tubes",
-        "Sheet Metal & Sheaths",
-        "Interior Lining & Wall Coverings",
-        "Trim & Corner Guards",
-        "J-Channels & Edge Extrusions",
-        "Fasteners & Hardware",
-        "Concrete Composite Mixes"
-    ]
-)
+def alpha_to_pos(s):
+    if pd.isna(s) or str(s).strip() == '': return 1
+    s = str(s).strip().upper()
+    if s.isdigit(): return int(s)
+    if s[0].isalpha(): return ord(s[0]) - ord('A') + 1
+    return 1
 
-# Prefix mapping (Mounting & Accessory Parts = 'B')
-prefix_map = {
-    "Mounting & Accessory Parts": "B",
-    "Frame Tubes": "F",
-    "Sheet Metal & Sheaths": "S",
-    "Interior Lining & Wall Coverings": "I",
-    "Trim & Corner Guards": "T",
-    "J-Channels & Edge Extrusions": "J",
-    "Fasteners & Hardware": "K",
-    "Concrete Composite Mixes": "K"
-}
+# --- 2. APP CONFIGURATION ---
+st.set_page_config(page_title="Diamond Ecosystem v6.1", layout="wide")
+st.title("💎 Diamond Ecosystem v6.1")
+st.markdown("### Manufacturing BOM Master Control")
 
-prefix = prefix_map[category]
+category = st.sidebar.selectbox("Category Navigation", [
+    "0: Master Sku", "1: Base Assy Kit", "2: Countertop Assy Kit",
+    "3: Cladding Assy Kit", "4: Finish Kit", "5: Cladding Assy",
+    "6: Cladding Panel", "7: Backer Board", "8: Countertop", "9: Frame"
+])
 
-st.header(f"Generator: {category}")
-st.info(f"Outputs 6-character part numbers starting with **{prefix}** (e.g., `{prefix}12345`).")
+# --- 3. DYNAMIC LOGIC MAPPING ---
+def process_data(df, category_name):
+    cat_prefix = category_name.split(":")[0]
+    col_out = category_name.split(": ")[1]
+    
+    # Required Column: Level 0 has 4 inputs, all others use 'MasterCode'
+    required_cols = ['Base Assy Kit', 'Countertop Assy Kit', 'Cladding Assy Kit', 'Finish Kit'] if cat_prefix == "0" else ['MasterCode']
+    
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        st.error(f"❌ Missing required columns: {', '.join(missing)}")
+        return None
 
-# --- 2. SINGLE CODE GENERATOR ---
-st.subheader("Generate Single Part Number")
+    def get_id(row):
+        try:
+            code = str(row.get('MasterCode', '')).upper().strip()
+            seg = [s.strip() for s in code.split('-')]
+            
+            # Use 'B' prefix if MasterCode starts with 'B-', otherwise use category number
+            output_prefix = "B" if code.startswith("B-") else cat_prefix
 
-col1, col2 = st.columns(2)
-with col1:
-    part_desc = st.text_input("Part Description / Name", placeholder="e.g., Refrigerator Riser Pad")
-with col2:
-    digits_input = st.text_input("5-Digit Seed (Leave blank for random)", max_chars=5)
+            # --- CATEGORY 0: MASTER SKU ---
+            if cat_prefix == "0":
+                base, top = str(row.get('Base Assy Kit', '')), str(row.get('Countertop Assy Kit', ''))
+                clad, fin = str(row.get('Cladding Assy Kit', '')), str(row.get('Finish Kit', ''))
+                n2_val = base[1] if len(base) > 1 else '0'
+                return f"0{n2_val}{poly_hash_v6(base + top + clad + fin)}-01"
+            
+            # --- CATEGORY 1, 2, 3: KIT LOGIC ---
+            elif cat_prefix in ["1", "2", "3"]:
+                match = re.search(r'\d(\d)', code)
+                n2_val = match.group(1) if match else "0"
+                return f"{output_prefix}{n2_val}{poly_hash_v6(code)}-01"
+            
+            # --- CATEGORY 4: FINISH KIT ---
+            elif cat_prefix == "4":
+                n2_val = extract_n2(seg[1]) if len(seg) > 1 else 0
+                return f"{output_prefix}{n2_val}{poly_hash_v6(code)}-01"
 
-if st.button("Generate Single Part Number"):
-    if digits_input:
-        cleaned = "".join(filter(str.isdigit, str(digits_input)))
-        if len(cleaned) == 5:
-            generated_code = f"{prefix}{cleaned}"
-        else:
-            st.error("Please enter exactly 5 numerical digits.")
-            st.stop()
-    else:
-        rand_num = random.randint(10000, 99999)
-        generated_code = f"{prefix}{rand_num}"
+            # --- CATEGORY 5: CLADDING ASSY ---
+            elif cat_prefix == "5":
+                if code.startswith('O-') or code.startswith('B-'):
+                    cleaned_code = code[2:].replace("-", "") if (code.startswith('O-') or code.startswith('B-')) else code.replace("-", "")
+                    n2_val = cleaned_code[1] if len(cleaned_code) > 1 else '0'
+                    return f"{output_prefix}{n2_val}{poly_hash_v6(cleaned_code)}-01"
+                return "FORMAT ERROR: Start with O- or B-"
+            
+            # --- CATEGORY 6, 7: COMPONENTS ---
+            elif cat_prefix in ["6", "7"]:
+                n2_val = extract_n2(seg[1]) if len(seg) > 1 else 0
+                return f"{output_prefix}{n2_val}{poly_hash_v6(''.join(seg[:4]))}-01"
 
-    st.success(f"**Generated Part Number:** `{generated_code}`")
-    st.code(f"Part No.: {generated_code}\nDescription: {part_desc if part_desc else 'N/A'}", language="text")
+            # --- CATEGORY 8: COUNTERTOP ---
+            elif cat_prefix == "8":
+                n2_val = extract_n2(seg[1]) if len(seg) > 1 else 0
+                return f"{output_prefix}{n2_val}{poly_hash_v6(''.join(seg[:3]))}-01"
+            
+            # --- CATEGORY 9: FRAME ---
+            elif cat_prefix == "9":
+                n2_val = extract_n2(seg[1]) if len(seg) > 1 else 0
+                fp = poly_hash_v6("".join(seg[:4]))
+                rev = alpha_to_pos(seg[4]) if len(seg) > 4 else 1
+                return f"{output_prefix}{n2_val}{fp}-{rev:02d}"
 
-st.markdown("---")
+            return "UNKNOWN"
+        except Exception: 
+            return "ERROR"
 
-# --- 3. BATCH PROCESSING FOR UPLOADED FILE ---
-st.header("Master File Cross-Reference & Batch Generator")
-uploaded_file = st.file_uploader(f"Upload Item Master / Code CSV for {category}", type=["csv"])
+    df[col_out] = df.apply(get_id, axis=1)
+    return df
+
+# --- 4. USER WORKFLOW ---
+uploaded_file = st.file_uploader(f"Upload CSV for {category}", type="csv")
 
 if uploaded_file is not None:
-    try:
-        df = pd.read_csv(uploaded_file, encoding='utf-8-sig')
-        df.columns = [str(c).strip() for c in df.columns]
-        
-        st.success(f"Loaded CSV successfully ({len(df)} records found).")
-        st.dataframe(df, use_container_width=True, hide_index=True)
-
-        # Batch Processing Button
-        if st.button("🚀 Generate Part Numbers for Uploaded List"):
-            code_col = df.columns[0]
-            used_seeds = set()
-
-            def process_batch_entry(val, idx):
-                s = str(val).strip()
-                digits_only = re.sub(r'\D', '', s)
-                
-                if len(digits_only) >= 5:
-                    seed = digits_only[:5]
-                else:
-                    seed = f"{(idx + 10000) % 90000 + 10000}"
-                
-                used_seeds.add(seed)
-                return f"{prefix}{seed}"
-
-            processed_df = df.copy()
-            processed_df["Generated_Part_No"] = [
-                process_batch_entry(row[code_col], i) for i, row in df.iterrows()
-            ]
-
-            # Reorder columns so Generated_Part_No is first
-            cols = ["Generated_Part_No"] + [c for c in processed_df.columns if c != "Generated_Part_No"]
-            processed_df = processed_df[cols]
-
-            st.markdown("### Processed Batch Results")
-            st.dataframe(processed_df, use_container_width=True, hide_index=True)
-
-            # CSV Download
-            csv_bytes = processed_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(
-                label=f"📥 Download Processed {category} CSV",
-                data=csv_bytes,
-                file_name=f"{category.replace(' ', '_')}_Generated_Codes.csv",
-                mime="text/csv"
-            )
-
-    except Exception as e:
-        st.error(f"Error loading file: {e}")
+    input_df = pd.read_csv(uploaded_file)
+    if st.button("🚀 Generate Diamond IDs"):
+        result_df = process_data(input_df, category)
+        if result_df is not None:
+            st.success(f"✅ Version 6.1 Active: {category} processed successfully.")
+            st.dataframe(result_df)
+            csv = result_df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Download Processed CSV", csv, f"{category.replace(':','_')}_v6.1.csv", "text/csv")
